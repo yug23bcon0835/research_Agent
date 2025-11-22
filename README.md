@@ -6,20 +6,32 @@ A sophisticated research application that uses multiple AI agents to conduct, cr
 
 - **Multi-Agent System**: Researcher, Critic, and Reviser agents work together
 - **Self-Correction**: Automatic quality assessment and iterative improvements
+- **Real Research Tools**: Integrated web search, Wikipedia, arXiv for actual data gathering
 - **Async Architecture**: Fully asynchronous implementation for optimal performance
 - **Database Integration**: Supabase for persistent storage and real-time updates
 - **Pydantic Models**: Type-safe data validation and serialization
 - **LLM Integration**: Uses Qwen model via Groq API
 - **REST API**: FastAPI-based web service
 - **Comprehensive Testing**: Full test suite with unit, integration, and end-to-end tests
+- **Debug Logging**: Detailed logging for troubleshooting and monitoring
 
 ## Architecture
 
 ### Agents
 
 1. **Researcher Agent**: Conducts initial research and generates comprehensive reports
+   - Gathers data from web search (DuckDuckGo/Tavily)
+   - Retrieves Wikipedia articles
+   - Searches arXiv for academic papers
+   - Synthesizes findings into structured reports
 2. **Critic Agent**: Evaluates report quality and provides detailed feedback
 3. **Reviser Agent**: Improves reports based on critique feedback
+
+### Research Tools
+
+1. **Web Search**: DuckDuckGo (free) or Tavily (premium) for current web information
+2. **Wikipedia**: Full article search and retrieval for encyclopedic knowledge
+3. **arXiv**: Academic paper search for research publications
 
 ### Self-Correction Loop
 
@@ -46,7 +58,9 @@ The system implements an iterative improvement process:
 
 4. Set up Supabase database:
    ```bash
-   # Apply the schema in supabase_schema.sql to your Supabase project
+   # Apply the FIXED schema to avoid RLS issues
+   # Use supabase_schema_fixed.sql instead of supabase_schema.sql
+   # In your Supabase SQL Editor, run the contents of supabase_schema_fixed.sql
    ```
 
 ## Configuration
@@ -57,16 +71,35 @@ Create a `.env` file with the following variables:
 # Supabase Configuration
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your-supabase-anon-key
+# IMPORTANT: Use service_role key for backend to avoid 401 errors
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 
 # Groq API Configuration
 GROQ_API_KEY=your-groq-api-key
 GROQ_MODEL=qwen-2.5-72b
+
+# Research Tools (optional but recommended)
+TAVILY_API_KEY=your-tavily-api-key  # For premium web search
+SERPAPI_KEY=your-serpapi-key        # Alternative search API
 
 # Application Settings
 DEBUG=True
 MAX_RETRIES=3
 RESEARCH_TIMEOUT=300
 ```
+
+### Required vs Optional Keys
+
+**Required:**
+- `SUPABASE_URL`: Your Supabase project URL
+- `SUPABASE_SERVICE_ROLE_KEY`: Service role key (to avoid 400/401 errors)
+- `GROQ_API_KEY`: Your Groq API key for LLM
+
+**Optional but Recommended:**
+- `TAVILY_API_KEY`: For better web search results (otherwise uses DuckDuckGo)
+- `SERPAPI_KEY`: Alternative search API
+
+**Note:** Get your Supabase service_role key from Project Settings → API in your Supabase dashboard. This key bypasses Row Level Security and should NEVER be exposed to frontend/client code.
 
 ## Usage
 
@@ -118,6 +151,8 @@ async with httpx.AsyncClient() as client:
 
 ## Testing
 
+### Unit Tests
+
 Run the test suite:
 
 ```bash
@@ -133,6 +168,28 @@ pytest tests/test_models.py
 # Run with verbose output
 pytest -v
 ```
+
+### Real Integration Testing
+
+Test with real LLM and Supabase:
+
+```bash
+# Run the integration test script
+python test_real_integration.py
+```
+
+This will:
+1. Test database connection
+2. Test research tools (web search, Wikipedia, arXiv)
+3. Run a simple research task end-to-end
+4. Verify data is saved to Supabase
+
+### Troubleshooting
+
+If you encounter issues, see:
+- `DEBUGGING_GUIDE.md` - Comprehensive troubleshooting guide
+- Application logs (enable `DEBUG=True` in `.env`)
+- Supabase dashboard → Table Editor to verify data
 
 ## Project Structure
 
@@ -152,9 +209,14 @@ app/
 ├── agents/                 # AI agents
 │   ├── __init__.py
 │   ├── base.py
-│   ├── researcher.py
+│   ├── researcher.py     # With real research tools
 │   ├── critic.py
 │   └── reviser.py
+├── tools/                  # Research tools
+│   ├── __init__.py
+│   ├── web_search.py     # DuckDuckGo/Tavily
+│   ├── wikipedia.py      # Wikipedia API
+│   └── arxiv_search.py   # arXiv papers
 ├── orchestrator/           # Multi-agent coordination
 │   ├── __init__.py
 │   └── coordinator.py
@@ -171,8 +233,11 @@ tests/                      # Test suite
 └── test_integration.py
 
 main.py                     # Application entry point
+test_real_integration.py    # Real integration test
 requirements.txt            # Dependencies
-supabase_schema.sql         # Database schema
+supabase_schema.sql         # Original database schema
+supabase_schema_fixed.sql   # Fixed schema (use this!)
+DEBUGGING_GUIDE.md          # Troubleshooting guide
 .env.example               # Environment variables template
 ```
 

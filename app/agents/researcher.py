@@ -1,6 +1,7 @@
 """Researcher agent for conducting initial research."""
 
 import json
+import logging
 from typing import Any, Dict, List, Optional
 
 from app.agents.base import BaseAgent
@@ -11,6 +12,12 @@ from app.models.research import (
     ResearchSection,
     ResearchSource
 )
+from app.tools.web_search import WebSearchTool
+from app.tools.wikipedia import WikipediaTool
+from app.tools.arxiv_search import ArxivTool
+from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class ResearcherAgent(BaseAgent):
@@ -18,6 +25,13 @@ class ResearcherAgent(BaseAgent):
     
     def __init__(self):
         super().__init__(AgentType.RESEARCHER)
+        # Initialize research tools
+        self.web_search = WebSearchTool(
+            tavily_api_key=settings.tavily_api_key,
+            serpapi_key=settings.serpapi_key
+        )
+        self.wikipedia = WikipediaTool()
+        self.arxiv = ArxivTool()
     
     async def process(
         self,
@@ -39,11 +53,15 @@ class ResearcherAgent(BaseAgent):
         7. Ensure logical flow and coherence
         """
         
-        # Generate research plan
+        # Step 1: Gather real research data from external sources
+        logger.info(f"Gathering research data for topic: {query.topic}")
+        research_data = await self._gather_research_data(query)
+        
+        # Step 2: Generate research plan
         research_plan = await self._generate_research_plan(query, system_prompt)
         
-        # Generate report content
-        report_content = await self._generate_report_content(query, research_plan, system_prompt)
+        # Step 3: Generate report content with real data
+        report_content = await self._generate_report_content(query, research_plan, research_data, system_prompt)
         
         # Create the research report
         report = ResearchReport(
@@ -55,11 +73,59 @@ class ResearcherAgent(BaseAgent):
             metadata={
                 "depth_level": query.depth_level,
                 "subtopics_explored": query.subtopics,
-                "research_plan": research_plan
+                "research_plan": research_plan,
+                "sources_gathered": {
+                    "web": len(research_data.get("web_results", [])),
+                    "wikipedia": len(research_data.get("wikipedia_results", [])),
+                    "arxiv": len(research_data.get("arxiv_results", []))
+                }
             }
         )
         
+        # Cleanup tool sessions
+        await self.web_search.close()
+        await self.wikipedia.close()
+        await self.arxiv.close()
+        
         return report
+    
+    async def _gather_research_data(self, query: ResearchQuery) -> Dict[str, Any]:
+        """Gather research data from multiple sources."""
+        research_data = {
+            "web_results": [],
+            "wikipedia_results": [],
+            "arxiv_results": []
+        }
+        
+        try:
+            # Search web for main topic and subtopics
+            search_queries = [query.topic] + (query.subtopics or [])
+            logger.info(f"Searching web for queries: {search_queries}")
+            
+            web_results = await self.web_search.multi_query_search(search_queries, max_results_per_query=3)
+            research_data["web_results"] = [
+                result
+                for results_list in web_results.values()
+                for result in results_list
+            ]
+            logger.info(f"Gathered {len(research_data['web_results'])} web results")
+            
+            # Search Wikipedia for main topic
+            logger.info(f"Searching Wikipedia for: {query.topic}")
+            wiki_results = await self.wikipedia.search_and_summarize(query.topic, max_articles=3)
+            research_data["wikipedia_results"] = wiki_results
+            logger.info(f"Gathered {len(wiki_results)} Wikipedia articles")
+            
+            # Search arXiv for academic papers (if topic seems academic)
+            logger.info(f"Searching arXiv for: {query.topic}")
+            arxiv_results = await self.arxiv.search(query.topic, max_results=5)
+            research_data["arxiv_results"] = arxiv_results
+            logger.info(f"Gathered {len(arxiv_results)} arXiv papers")
+            
+        except Exception as e:
+            logger.error(f"Error gathering research data: {str(e)}", exc_info=True)
+        
+        return research_data
     
     async def _generate_research_plan(self, query: ResearchQuery, system_prompt: str) -> Dict[str, Any]:
         """Generate a research plan for the given query."""
@@ -96,12 +162,16 @@ class ResearcherAgent(BaseAgent):
         self,
         query: ResearchQuery,
         research_plan: Dict[str, Any],
+        research_data: Dict[str, Any],
         system_prompt: str
     ) -> Dict[str, Any]:
         """Generate the actual report content."""
         
+        # Format research data for the LLM
+        research_context = self._format_research_data(research_data)
+        
         prompt = f"""
-        Based on the research plan, generate a comprehensive research report on:
+        Based on the research plan and the gathered research data, generate a comprehensive research report on:
         
         Topic: {query.topic}
         Subtopics: {', '.join(query.subtopics) if query.subtopics else 'None specified'}
@@ -111,6 +181,9 @@ class ResearcherAgent(BaseAgent):
         Research Plan:
         {json.dumps(research_plan, indent=2)}
         
+        Research Data Gathered:
+        {research_context}
+        
         Generate a detailed research report with the following structure:
         
         1. Abstract: A concise summary of the entire report (150-200 words)
@@ -119,8 +192,11 @@ class ResearcherAgent(BaseAgent):
         
         For each section, include:
         - Clear title
-        - Comprehensive content
-        - Relevant sources (create realistic but fictional sources for demonstration)
+        - Comprehensive content synthesized from the research data
+        - Relevant sources from the gathered research data (use real URLs and titles from the data provided)
+        
+        Important: Use the actual sources provided in the research data. Reference web articles, Wikipedia pages,
+        and arXiv papers by their real titles and URLs. Give proper attribution to sources.
         
         Return your response as a JSON object with this structure:
         {{
@@ -128,11 +204,11 @@ class ResearcherAgent(BaseAgent):
             "sections": [
                 {{
                     "title": "Section Title",
-                    "content": "Section content here...",
+                    "content": "Section content here based on research data...",
                     "sources": [
                         {{
-                            "title": "Source Title",
-                            "url": "https://example.com/source",
+                            "title": "Actual source title from research data",
+                            "url": "Actual URL from research data",
                             "content": "Brief summary of source content",
                             "credibility_score": 0.9
                         }}
@@ -140,11 +216,11 @@ class ResearcherAgent(BaseAgent):
                     "confidence_score": 0.8
                 }}
             ],
-            "conclusion": "Conclusion text here...",
+            "conclusion": "Conclusion text here based on findings...",
             "sources": [
                 {{
-                    "title": "Source Title",
-                    "url": "https://example.com/source",
+                    "title": "Actual source title from research data",
+                    "url": "Actual URL from research data",
                     "content": "Brief summary",
                     "credibility_score": 0.9
                 }}
@@ -152,6 +228,7 @@ class ResearcherAgent(BaseAgent):
         }}
         
         Make sure the content is detailed, well-researched, and professional in tone.
+        Base your report on the actual research data provided, not on fictional sources.
         """
         
         response = await self.generate_structured_llm_response(prompt, system_prompt)
@@ -180,3 +257,40 @@ class ResearcherAgent(BaseAgent):
             "conclusion": response.get("conclusion", ""),
             "sources": sources
         }
+    
+    def _format_research_data(self, research_data: Dict[str, Any]) -> str:
+        """Format research data into a readable string for the LLM."""
+        formatted = []
+        
+        # Format web results
+        web_results = research_data.get("web_results", [])
+        if web_results:
+            formatted.append("=== WEB SEARCH RESULTS ===")
+            for i, result in enumerate(web_results[:10], 1):
+                formatted.append(f"\n{i}. {result.get('title', 'No title')}")
+                formatted.append(f"   URL: {result.get('url', 'No URL')}")
+                formatted.append(f"   Snippet: {result.get('snippet', 'No snippet')[:200]}")
+        
+        # Format Wikipedia results
+        wiki_results = research_data.get("wikipedia_results", [])
+        if wiki_results:
+            formatted.append("\n\n=== WIKIPEDIA ARTICLES ===")
+            for i, result in enumerate(wiki_results, 1):
+                formatted.append(f"\n{i}. {result.get('title', 'No title')}")
+                formatted.append(f"   URL: {result.get('url', 'No URL')}")
+                formatted.append(f"   Extract: {result.get('extract', 'No extract')[:500]}")
+        
+        # Format arXiv results
+        arxiv_results = research_data.get("arxiv_results", [])
+        if arxiv_results:
+            formatted.append("\n\n=== ARXIV RESEARCH PAPERS ===")
+            for i, result in enumerate(arxiv_results, 1):
+                formatted.append(f"\n{i}. {result.get('title', 'No title')}")
+                formatted.append(f"   Authors: {', '.join(result.get('authors', []))}")
+                formatted.append(f"   URL: {result.get('url', 'No URL')}")
+                formatted.append(f"   Abstract: {result.get('abstract', 'No abstract')[:300]}")
+        
+        if not formatted:
+            return "No research data gathered."
+        
+        return "\n".join(formatted)

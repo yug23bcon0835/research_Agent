@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # Supabase Configuration
     supabase_url: str = Field(default="http://localhost:8000")
     supabase_key: str = Field(default="test-key")
+    supabase_service_role_key: Optional[str] = Field(default=None)  # Use for backend operations
     
     # Groq API Configuration
     groq_api_key: str = Field(default="test-key")
@@ -28,6 +29,10 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False)
     max_retries: int = Field(default=3)
     research_timeout: int = Field(default=300)
+    
+    # Research Tools API Keys
+    tavily_api_key: Optional[str] = Field(default=None)  # For web search
+    serpapi_key: Optional[str] = Field(default=None)  # Alternative web search
 
 
 # Create settings instance, allowing for test overrides
