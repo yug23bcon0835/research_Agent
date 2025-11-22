@@ -1,6 +1,7 @@
 """Supabase database connection and operations."""
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -14,6 +15,13 @@ from app.models.research import (
     AgentMessage
 )
 
+# Setup logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.DEBUG if settings.debug else logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
 
 class SupabaseManager:
     """Manages Supabase database operations."""
@@ -25,14 +33,23 @@ class SupabaseManager:
     async def initialize(self) -> DatabaseOperationResult:
         """Initialize Supabase client."""
         try:
-            self.client = create_client(settings.supabase_url, settings.supabase_key)
+            # Use service role key if available, otherwise use regular key
+            api_key = settings.supabase_service_role_key or settings.supabase_key
+            
+            logger.info(f"Initializing Supabase client with URL: {settings.supabase_url}")
+            logger.debug(f"Using {'service_role' if settings.supabase_service_role_key else 'anon'} key")
+            
+            self.client = create_client(settings.supabase_url, api_key)
             self._initialized = True
+            
+            logger.info("Supabase client initialized successfully")
             return DatabaseOperationResult(
                 success=True,
                 message="Supabase client initialized successfully",
                 data={"client_initialized": True}
             )
         except Exception as e:
+            logger.error(f"Failed to initialize Supabase client: {str(e)}", exc_info=True)
             return DatabaseOperationResult(
                 success=False,
                 message="Failed to initialize Supabase client",
@@ -52,21 +69,25 @@ class SupabaseManager:
             task_data = task.model_dump(exclude_none=True)
             task_data["created_at"] = datetime.now(timezone.utc).isoformat()
             
+            logger.debug(f"Creating task with data: {json.dumps(task_data, default=str)[:200]}")
             response = self.client.table("research_tasks").insert(task_data).execute()
             
             if response.data:
+                logger.info(f"Task created successfully with ID: {response.data[0].get('id')}")
                 return DatabaseOperationResult(
                     success=True,
                     message="Task created successfully",
                     data=response.data[0] if response.data else None
                 )
             else:
+                logger.error("Failed to create task: No data returned from database")
                 return DatabaseOperationResult(
                     success=False,
                     message="Failed to create task",
                     error="No data returned from database"
                 )
         except Exception as e:
+            logger.error(f"Database error while creating task: {str(e)}", exc_info=True)
             return DatabaseOperationResult(
                 success=False,
                 message="Database error while creating task",
@@ -135,21 +156,25 @@ class SupabaseManager:
             report_data["task_id"] = task_id
             report_data["created_at"] = datetime.now(timezone.utc).isoformat()
             
+            logger.debug(f"Saving report for task_id: {task_id}")
             response = self.client.table("research_reports").insert(report_data).execute()
             
             if response.data:
+                logger.info(f"Report saved successfully for task {task_id}")
                 return DatabaseOperationResult(
                     success=True,
                     message="Report saved successfully",
                     data=response.data[0] if response.data else None
                 )
             else:
+                logger.error(f"Failed to save report for task {task_id}: No data returned")
                 return DatabaseOperationResult(
                     success=False,
                     message="Failed to save report",
                     error="No data returned from database"
                 )
         except Exception as e:
+            logger.error(f"Database error while saving report for task {task_id}: {str(e)}", exc_info=True)
             return DatabaseOperationResult(
                 success=False,
                 message="Database error while saving report",
@@ -165,21 +190,25 @@ class SupabaseManager:
             feedback_data["task_id"] = task_id
             feedback_data["created_at"] = datetime.now(timezone.utc).isoformat()
             
+            logger.debug(f"Saving feedback for task_id: {task_id}, score: {feedback.overall_score}")
             response = self.client.table("critique_feedback").insert(feedback_data).execute()
             
             if response.data:
+                logger.info(f"Feedback saved successfully for task {task_id}")
                 return DatabaseOperationResult(
                     success=True,
                     message="Feedback saved successfully",
                     data=response.data[0] if response.data else None
                 )
             else:
+                logger.error(f"Failed to save feedback for task {task_id}: No data returned")
                 return DatabaseOperationResult(
                     success=False,
                     message="Failed to save feedback",
                     error="No data returned from database"
                 )
         except Exception as e:
+            logger.error(f"Database error while saving feedback for task {task_id}: {str(e)}", exc_info=True)
             return DatabaseOperationResult(
                 success=False,
                 message="Database error while saving feedback",
@@ -194,6 +223,7 @@ class SupabaseManager:
             message_data = message.model_dump(exclude_none=True)
             message_data["task_id"] = task_id
             
+            logger.debug(f"Logging agent message for task {task_id}: {message.agent_type} - {message.message[:50]}...")
             response = self.client.table("agent_messages").insert(message_data).execute()
             
             if response.data:
@@ -203,12 +233,14 @@ class SupabaseManager:
                     data=response.data[0] if response.data else None
                 )
             else:
+                logger.warning(f"Failed to log agent message for task {task_id}: No data returned")
                 return DatabaseOperationResult(
                     success=False,
                     message="Failed to log agent message",
                     error="No data returned from database"
                 )
         except Exception as e:
+            logger.error(f"Database error while logging agent message for task {task_id}: {str(e)}", exc_info=True)
             return DatabaseOperationResult(
                 success=False,
                 message="Database error while logging agent message",
