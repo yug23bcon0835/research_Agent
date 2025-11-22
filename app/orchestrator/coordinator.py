@@ -26,17 +26,19 @@ class ResearchCoordinator:
         self.critic = CriticAgent()
         self.reviser = ReviserAgent()
         self.min_quality_score = 7.0  # Minimum acceptable quality score
+        self.db_manager = db_manager
+        self.llm_client = llm_client
     
     async def initialize(self) -> bool:
         """Initialize the coordinator and all dependencies."""
         try:
             # Initialize LLM client
-            llm_initialized = await llm_client.initialize()
+            llm_initialized = await self.llm_client.initialize()
             if not llm_initialized:
                 return False
             
             # Initialize database
-            db_result = await db_manager.initialize()
+            db_result = await self.db_manager.initialize()
             if not db_result.success:
                 return False
             
@@ -55,7 +57,7 @@ class ResearchCoordinator:
         )
         
         # Save task to database
-        task_result = await db_manager.create_task(task)
+        task_result = await self.db_manager.create_task(task)
         if task_result.success and task_result.data:
             task.id = task_result.data.get("id")
         
@@ -75,14 +77,14 @@ class ResearchCoordinator:
             task.current_report = current_report
             
             # Save initial report
-            await db_manager.save_report(current_report, task.id)
-            
+            await self.db_manager.save_report(current_report, task.id)
+
             # Phase 2: Self-Correction Loop
             final_report = await self._self_correction_loop(query, current_report, task.id)
             task.current_report = final_report
-            
+
             # Save final report
-            await db_manager.save_report(final_report, task.id)
+            await self.db_manager.save_report(final_report, task.id)
             
             # Mark task as completed
             await self._update_task_status(task.id, ResearchStatus.COMPLETED)
@@ -188,7 +190,7 @@ class ResearchCoordinator:
         )
         
         # Save feedback to database
-        await db_manager.save_feedback(feedback, task_id)
+        await self.db_manager.save_feedback(feedback, task_id)
         
         await self._log_agent_message(
             task_id,
@@ -222,7 +224,7 @@ class ResearchCoordinator:
     
     async def _update_task_status(self, task_id: str, status: ResearchStatus):
         """Update the task status in the database."""
-        await db_manager.update_task(
+        await self.db_manager.update_task(
             task_id=task_id,
             updates={"status": status.value, "updated_at": datetime.now(timezone.utc).isoformat()}
         )
@@ -234,12 +236,12 @@ class ResearchCoordinator:
             message=message,
             timestamp=datetime.now(timezone.utc)
         )
-        
-        await db_manager.log_agent_message(agent_message, task_id)
+
+        await self.db_manager.log_agent_message(agent_message, task_id)
     
     async def get_task_status(self, task_id: str) -> Optional[ResearchTask]:
         """Get the current status of a research task."""
-        result = await db_manager.get_task(task_id)
+        result = await self.db_manager.get_task(task_id)
         if result.success and result.data:
             return ResearchTask(**result.data)
         return None
