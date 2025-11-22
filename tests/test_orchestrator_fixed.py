@@ -84,12 +84,10 @@ class TestResearchCoordinator:
     @pytest.mark.asyncio
     async def test_initialize_failure(self, coordinator):
         """Test initialization failure."""
-        with patch('app.llm.client.llm_client') as mock_llm_client, \
-             patch('app.database.connection.db_manager') as mock_db_manager:
-            
-            mock_llm_client.initialize = AsyncMock(return_value=False)
-            mock_db_manager.initialize = AsyncMock(return_value=MagicMock(success=False))
-            
+        mock_llm_client = MagicMock()
+        mock_llm_client.initialize = AsyncMock(return_value=False)
+
+        with patch.object(coordinator, 'llm_client', mock_llm_client):
             result = await coordinator.initialize()
             assert result is False
     
@@ -233,19 +231,20 @@ class TestResearchCoordinator:
     async def test_get_task_status(self, coordinator):
         """Test getting task status."""
         from app.models.research import ResearchQuery
-        
+
         mock_task_data = {
             "id": "task123",
             "status": "completed",
             "query": {"topic": "AI", "subtopics": [], "depth_level": 3, "requirements": None},
             "created_at": "2023-01-01T00:00:00"
         }
-        
-        with patch('app.database.connection.db_manager') as mock_db_manager:
-            mock_db_manager.get_task = AsyncMock(return_value=MagicMock(success=True, data=mock_task_data))
-            
+
+        mock_db_manager = MagicMock()
+        mock_db_manager.get_task = AsyncMock(return_value=MagicMock(success=True, data=mock_task_data))
+
+        with patch.object(coordinator, 'db_manager', mock_db_manager):
             result = await coordinator.get_task_status("task123")
-            
+
             assert result is not None
             assert result.id == "task123"
             assert result.status == ResearchStatus.COMPLETED

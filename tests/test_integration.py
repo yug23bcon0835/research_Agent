@@ -20,14 +20,21 @@ class TestIntegration:
             depth_level=3,
             requirements="Focus on recent developments"
         )
-        
+
+        # Mock database manager
+        mock_db_manager = MagicMock()
+        mock_db_manager.create_task = AsyncMock(return_value=MagicMock(success=True, data={"id": "integration_test_123"}))
+        mock_db_manager.save_report = AsyncMock()
+        mock_db_manager.save_feedback = AsyncMock()
+        mock_db_manager.log_agent_message = AsyncMock()
+        mock_db_manager.update_task = AsyncMock()
+
         # Mock the entire system
-        with patch('app.database.connection.db_manager') as mock_db_manager, \
+        with patch.object(coordinator, 'db_manager', mock_db_manager), \
              patch.object(coordinator, 'initialize') as mock_init:
-            
+
             # Setup mocks
             mock_init.return_value = True
-            mock_db_manager.create_task = AsyncMock(return_value=MagicMock(success=True, data={"id": "integration_test_123"}))
             
             # Mock LLM responses for researcher
             mock_research_plan = {
@@ -124,11 +131,11 @@ class TestIntegration:
                 assert len(task.current_report.sources) == 2
                 
                 # Verify database operations were called
-                mock_create_task.assert_called_once()
-                assert mock_save_report.call_count >= 1  # At least initial report saved
-                mock_save_feedback.assert_called_once()
-                assert mock_log_message.call_count >= 3  # Multiple agent messages
-                assert mock_update_task.call_count >= 1  # Status updates
+                mock_db_manager.create_task.assert_called_once()
+                assert mock_db_manager.save_report.call_count >= 1  # At least initial report saved
+                mock_db_manager.save_feedback.assert_called_once()
+                assert mock_db_manager.log_agent_message.call_count >= 3  # Multiple agent messages
+                assert mock_db_manager.update_task.call_count >= 1  # Status updates
     
     @pytest.mark.asyncio
     async def test_research_with_revisions(self):
@@ -138,12 +145,19 @@ class TestIntegration:
             topic="Climate Change",
             depth_level=4
         )
-        
-        with patch('app.database.connection.db_manager') as mock_db_manager, \
+
+        # Mock database manager
+        mock_db_manager = MagicMock()
+        mock_db_manager.create_task = AsyncMock(return_value=MagicMock(success=True, data={"id": "revision_test_123"}))
+        mock_db_manager.save_report = AsyncMock()
+        mock_db_manager.save_feedback = AsyncMock()
+        mock_db_manager.log_agent_message = AsyncMock()
+        mock_db_manager.update_task = AsyncMock()
+
+        with patch.object(coordinator, 'db_manager', mock_db_manager), \
              patch.object(coordinator, 'initialize') as mock_init:
-            
+
             mock_init.return_value = True
-            mock_db_manager.create_task = AsyncMock(return_value=MagicMock(success=True, data={"id": "revision_test_123"}))
             
             # Mock initial research (low quality)
             mock_initial_report = {
@@ -249,11 +263,11 @@ class TestIntegration:
                 assert task.current_report is not None
                 
                 # Verify multiple saves (initial + revised)
-                assert mock_save_report.call_count >= 2
-                
+                assert mock_db_manager.save_report.call_count >= 2
+
                 # Verify multiple critiques
-                assert mock_save_feedback.call_count >= 2
-                
+                assert mock_db_manager.save_feedback.call_count >= 2
+
                 # Verify revision process was triggered
                 mock_reviser_llm.assert_called_once()
     
